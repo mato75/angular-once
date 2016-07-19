@@ -13,7 +13,7 @@
     // get value to watch
     var watchingValue = watcherParser($scope);
     // if we have a valid value, render the binding's value
-    if (watchingValue !== undefined) {
+    if (watchingValue !== undefined && !angular.equals($scope['prev' + watch], watchingValue)) {
       // if watching and binding $parsers are the same, use watching's value, else $parse the new value
       done(element, watcherParser == bindingParser ? watchingValue : bindingParser($scope), $scope['prev' + watch]);
       if (useOldValue) {
@@ -42,10 +42,10 @@
 
   var once = angular.module('once', []);
 
-  var onRefresh = ['onceRefresh', 'onceListRefresh'];
+  var onRefresh = ['onceChange'];
 
   function makeBindingDirective(definition) {
-    once.directive(definition.name, ['$parse', '$timeout', function ($parse, $timeout) {
+    once.directive(definition.name, ['$parse', function ($parse) {
       return {
         priority: definition.priority || 0,
         link: function ($scope, element, attrs) {
@@ -63,21 +63,12 @@
           if (onRefresh.indexOf(definition.name) !== -1) {
             return;
           }
-          if ('onceRefresh' in attrs) {
-              useOldValue = true;
-              $scope.$watch(attrs.onceRefresh, function (nValue, oValue) {
-                if (angular.equals(nValue, oValue) || !firstBind) {
-                  return;
-                }
-                _bind(watch, definition.name, definition.binding);
-              });
-          }
 
-          if ('onceListRefresh' in attrs) {
-              useOldValue = true;
-              $scope.$watchCollection(attrs.onceListRefresh, function (nValue, oValue) {
-                if (angular.equals(nValue, oValue) || !firstBind) {
-                  return;
+          if ('onceChange' in attrs) {
+            useOldValue = true;
+            $scope.$on(attrs.onceChange, function () {
+                if (!firstBind) {
+                    return;
                 }
                 _bind(watch, definition.name, definition.binding);
               });
@@ -91,14 +82,9 @@
 
   var bindingsDefinitions = [
     {
-      name: 'onceRefresh',
+      name: 'onceChange',
       binding: function (element, value) {
 
-      }
-    },
-    {
-      name: 'onceListRefresh',
-      binding: function (element, value) {
       }
     },
     {
