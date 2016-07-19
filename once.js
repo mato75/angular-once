@@ -9,25 +9,28 @@
 (function (window, angular, undefined) {
   'use strict';
 
-  function setOneTimeBinding($scope, element, watch, watcherParser, bindingParser, done) {
+  function setOneTimeBinding($scope, element, watch, watcherParser, bindingParser, done, useOldValue) {
     // get value to watch
     var watchingValue = watcherParser($scope);
     // if we have a valid value, render the binding's value
     if (watchingValue !== undefined) {
       // if watching and binding $parsers are the same, use watching's value, else $parse the new value
-      return done(element, watcherParser == bindingParser ? watchingValue : bindingParser($scope));
+      done(element, watcherParser == bindingParser ? watchingValue : bindingParser($scope), $scope['prev' + watch]);
+      if (useOldValue) {
+        $scope['prev' + watch] = watchingValue;
+      }
+      return;
     }
 
     // we do not have a valid value, so we register a $watch
-    var watcherRemover = $scope.$watch(watch, function (newValue) {
+    var watcherRemover = $scope.$watch(watch, function (newValue, oldValue) {
       // wait until we have a valid value
       if (newValue == undefined) return;
       // remove this $watch
       removeWatcher();
       // if watching and binding $parsers are the same, use watching's value, else $parse the new value
-      return done(element, watcherParser == bindingParser ? newValue : bindingParser($scope));
+      return done(element, watcherParser == bindingParser ? newValue : bindingParser($scope), useOldValue ? oldValue : null);
     });
-
     function removeWatcher() {
       if (watcherRemover) {
         watcherRemover();
@@ -39,21 +42,65 @@
 
   var once = angular.module('once', []);
 
+  var onRefresh = ['onceRefresh', 'onceListRefresh'];
+
   function makeBindingDirective(definition) {
-    once.directive(definition.name, ['$parse', function ($parse) {
+    once.directive(definition.name, ['$parse', '$timeout', function ($parse, $timeout) {
       return {
         priority: definition.priority || 0,
         link: function ($scope, element, attrs) {
           var watch = attrs.onceWaitFor || attrs[definition.name];
-          var watcherParser = $parse(watch);
-          var bindingParser = attrs.onceWaitFor ? $parse(attrs[definition.name]) : watcherParser;
-          setOneTimeBinding($scope, element, watch, watcherParser, bindingParser, definition.binding);
+          var firstBind = false;
+          var useOldValue = false;
+
+          var _bind = function (w, n, b) {
+            var watcherParser = $parse(watch);
+            var bindingParser = attrs.onceWaitFor ? $parse(attrs[n]) : watcherParser;
+            setOneTimeBinding($scope, element, watch, watcherParser, bindingParser, b, useOldValue);
+            firstBind = true;
+          };
+
+          if (onRefresh.indexOf(definition.name) !== -1) {
+            return;
+          }
+          if ('onceRefresh' in attrs) {
+              useOldValue = true;
+              $scope.$watch(attrs.onceRefresh, function (nValue, oValue) {
+                if (angular.equals(nValue, oValue) || !firstBind) {
+                  return;
+                }
+                _bind(watch, definition.name, definition.binding);
+              });
+          }
+
+          if ('onceListRefresh' in attrs) {
+              useOldValue = true;
+              $scope.$watchCollection(attrs.onceListRefresh, function (nValue, oValue) {
+                if (angular.equals(nValue, oValue) || !firstBind) {
+                  return;
+                }
+                _bind(watch, definition.name, definition.binding);
+              });
+          }
+
+          _bind(watch, definition.name, definition.binding);
         }
       };
     }]);
   }
 
   var bindingsDefinitions = [
+    {
+      name: 'onceRefresh',
+      binding: function (element, value) {
+
+      }
+    },
+    {
+      name: 'onceListRefresh',
+      binding: function (element, value) {
+      }
+    },
     {
       name: 'onceText',
       binding: function (element, value) {
@@ -109,7 +156,7 @@
     },
     {
       name: 'onceClass',
-      binding: function (element, value) {
+      binding: function (element, value, oValue) {
         if (angular.isObject(value) && !angular.isArray(value)) {
           var results = [];
           angular.forEach(value, function (val, index) {
@@ -117,6 +164,18 @@
           });
           value = results;
         }
+
+        if (oValue) {
+          if (angular.isObject(oValue) && !angular.isArray(oValue)) {
+            var results = [];
+            angular.forEach(oValue, function (val, index) {
+              if (val) results.push(index);
+            });
+            oValue = results;
+          }
+          element.removeClass(angular.isArray(oValue) ? oValue.join(' ') : oValue);
+        }
+
         if (value) {
           element.addClass(angular.isArray(value) ? value.join(' ') : value);
         }
